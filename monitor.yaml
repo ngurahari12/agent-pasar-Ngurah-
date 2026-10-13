@@ -1,0 +1,56 @@
+name: agent-pasar
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # alert tiap ~5 menit (GitHub bisa telat beberapa menit)
+    - cron: "30 0 * * 1-5"  # brief PAGI 07:30 WIB (cron memakai UTC), Senin-Jumat
+    - cron: "30 9 * * 1-5"  # brief SORE 16:30 WIB, Senin-Jumat
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "alert, morning, evening, atau daily"
+        default: "alert"
+
+concurrency:
+  group: agent-pasar
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Pulihkan state
+        uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: state-${{ github.run_id }}
+          restore-keys: state-
+
+      - name: Jalankan
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          MODE: ${{ github.event.inputs.mode || (github.event.schedule == '30 0 * * 1-5' && 'morning' || (github.event.schedule == '30 9 * * 1-5' && 'evening' || 'alert')) }}
+        run: |
+          case "$MODE" in
+            morning|evening) python screener.py "$MODE" ;;
+            *) python monitor.py "$MODE" ;;
+          esac
+
+      - name: Simpan state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state.json
+          key: state-${{ github.run_id }}
